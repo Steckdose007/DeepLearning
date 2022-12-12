@@ -52,3 +52,7 @@ class FullyConnected(BaseLayer):
         self._gradient_weights = mat_mult
         return grad_input
 
+    def initialize(self, weights_initializer, bias_initializer):
+        self.weights = weights_initializer.initialize(self.weights.shape, self.input_size, self.output_size)
+        self.weights[-1] = bias_initializer.initialize(self.weights[-1].shape, 1, self.output_size)
+

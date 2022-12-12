@@ -5,7 +5,9 @@ from Layers import *
 from Optimization import *
 
 class NeuralNetwork():
-    def __init__(self,optim):
+    def __init__(self,optim,weights_initializer,bias_initializer):
+        self.weights_initializer = weights_initializer
+        self.bias_initializer = bias_initializer
         self.optimizer = optim
         #loss value for each iteration
         self.loss = []
@@ -41,6 +43,7 @@ class NeuralNetwork():
             #deepcopy creates new object without modifying old one
             optimizer = copy.deepcopy(self.optimizer)
             layer._optimizer = optimizer
+            layer.initialize(self.weights_initializer, self.bias_initializer)
         self.layers.append(layer)
 
     def train(self, iterations):

@@ -2,14 +2,17 @@ import unittest
 from Layers import *
 from Optimization import *
 import numpy as np
+from scipy import stats
+from scipy.ndimage.filters import gaussian_filter
 import NeuralNetwork
 import matplotlib.pyplot as plt
+import os
 import tabulate
 import argparse
 
-ID = 1  # identifier for dispatcher
+ID = 2  # identifier for dispatcher
 
-class TestFullyConnected1(unittest.TestCase):
+class TestFullyConnected2(unittest.TestCase):
     def setUp(self):
         self.batch_size = 9
         self.input_size = 4
@@ -19,7 +22,20 @@ class TestFullyConnected1(unittest.TestCase):
         self.categories = 4
         self.label_tensor = np.zeros([self.batch_size, self.categories])
         for i in range(self.batch_size):
-            self.label_tensor[i, np.random.randint(0, self.categories)] = 1  # one-hot encoded labels
+            self.label_tensor[i, np.random.randint(0, self.categories)] = 1
+
+    class TestInitializer:
+        def __init__(self):
+            self.fan_in = None
+            self.fan_out = None
+
+        def initialize(self, shape, fan_in, fan_out):
+            self.fan_in = fan_in
+            self.fan_out = fan_out
+            weights = np.zeros(shape)
+            weights[0] = 1
+            weights[1] = 2
+            return weights
 
     def test_trainable(self):
         layer = FullyConnected.FullyConnected(self.input_size, self.output_size)
@@ -34,7 +50,6 @@ class TestFullyConnected1(unittest.TestCase):
     def test_backward_size(self):
         layer = FullyConnected.FullyConnected(self.input_size, self.output_size)
         output_tensor = layer.forward(self.input_tensor)
-        # print(output_tensor.shape)
         error_tensor = layer.backward(output_tensor)
         self.assertEqual(error_tensor.shape[1], self.input_size)
         self.assertEqual(error_tensor.shape[0], self.batch_size)
@@ -44,9 +59,8 @@ class TestFullyConnected1(unittest.TestCase):
         layer.optimizer = Optimizers.Sgd(1)
         for _ in range(10):
             output_tensor = layer.forward(self.input_tensor)
-            error_tensor = np.zeros([self.batch_size, self.output_size])
+            error_tensor = np.zeros([ self.batch_size, self.output_size])
             error_tensor -= output_tensor
-            # print(error_tensor.shape)
             layer.backward(error_tensor)
             new_output_tensor = layer.forward(self.input_tensor)
             self.assertLess(np.sum(np.power(output_tensor, 2)), np.sum(np.power(new_output_tensor, 2)))
@@ -85,6 +99,20 @@ class TestFullyConnected1(unittest.TestCase):
         result = layer.forward(input_tensor)
         self.assertGreater(np.sum(result), 0)
 
+    def test_initialization(self):
+        input_size = 4
+        categories = 10
+        layer = FullyConnected.FullyConnected(input_size, categories)
+        init = TestFullyConnected2.TestInitializer()
+        layer.initialize(init, Initializers.Constant(0.5))
+        self.assertEqual(init.fan_in, input_size)
+        self.assertEqual(init.fan_out, categories)
+        if layer.weights.shape[0]>layer.weights.shape[1]:
+            self.assertLessEqual(np.sum(layer.weights) - 17, 1e-5)
+        else:
+            self.assertLessEqual(np.sum(layer.weights) - 35, 1e-5)
+
+
 
 class TestReLU(unittest.TestCase):
     def setUp(self):
@@ -92,7 +120,7 @@ class TestReLU(unittest.TestCase):
         self.batch_size = 10
         self.half_batch_size = int(self.batch_size / 2)
         self.input_tensor = np.ones([self.batch_size, self.input_size])
-        self.input_tensor[0:self.half_batch_size, :] -= 2
+        self.input_tensor[0:self.half_batch_size,:] -= 2
 
         self.label_tensor = np.zeros([self.batch_size, self.input_size])
         for i in range(self.batch_size):
@@ -108,7 +136,7 @@ class TestReLU(unittest.TestCase):
 
         layer = ReLU.ReLU()
         output_tensor = layer.forward(self.input_tensor)
-        self.assertEqual(np.sum(np.power(output_tensor - expected_tensor, 2)), 0)
+        self.assertEqual(np.sum(np.power(output_tensor-expected_tensor, 2)), 0)
 
     def test_backward(self):
         expected_tensor = np.zeros([self.batch_size, self.input_size])
@@ -116,7 +144,7 @@ class TestReLU(unittest.TestCase):
 
         layer = ReLU.ReLU()
         layer.forward(self.input_tensor)
-        output_tensor = layer.backward(self.input_tensor * 2)
+        output_tensor = layer.backward(self.input_tensor*2)
         self.assertEqual(np.sum(np.power(output_tensor - expected_tensor, 2)), 0)
 
     def test_gradient(self):
@@ -128,6 +156,7 @@ class TestReLU(unittest.TestCase):
         layers.append(L2Loss())
         difference = Helpers.gradient_check(layers, input_tensor, self.label_tensor)
         self.assertLessEqual(np.sum(difference), 1e-5)
+
 
 class TestSoftMax(unittest.TestCase):
 
@@ -192,7 +221,6 @@ class TestSoftMax(unittest.TestCase):
         # test if every correct class confidence is increased
         for element in error[self.label_tensor == 1]:
             self.assertAlmostEqual(element, -1, places = 3)
-
 
     def test_regression_forward(self):
         np.random.seed(1337)
@@ -284,7 +312,7 @@ class TestCrossEntropyLoss(unittest.TestCase):
         self.assertAlmostEqual(loss, 324.3928805, places = 4)
 
 
-class TestOptimizers1(unittest.TestCase):
+class TestOptimizers2(unittest.TestCase):
 
     def test_sgd(self):
         optimizer = Optimizers.Sgd(1.)
@@ -295,12 +323,447 @@ class TestOptimizers1(unittest.TestCase):
         result = optimizer.calculate_update(result, 1.)
         np.testing.assert_almost_equal(result, np.array([-1.]))
 
+    def test_sgd_with_momentum(self):
+        optimizer = Optimizers.SgdWithMomentum(1., 0.9)
 
-class TestNeuralNetwork1(unittest.TestCase):
+        result = optimizer.calculate_update(1., 1.)
+        np.testing.assert_almost_equal(result, np.array([0.]))
+
+        result = optimizer.calculate_update(result, 1.)
+        np.testing.assert_almost_equal(result, np.array([-1.9]))
+
+    def test_adam(self):
+        optimizer = Optimizers.Adam(1., 0.01, 0.02)
+
+        result = optimizer.calculate_update(1., 1.)
+        np.testing.assert_almost_equal(result, np.array([0.]))
+
+        result = optimizer.calculate_update(result, .5)
+        np.testing.assert_almost_equal(result, np.array([-0.9814473195614205]))
+
+
+class TestInitializers(unittest.TestCase):
+    class DummyLayer:
+        def __init__(self, input_size, output_size):
+            self.weights = []
+            self.shape = (output_size, input_size)
+
+        def initialize(self, initializer):
+            self.weights = initializer.initialize(self.shape, self.shape[1], self.shape[0])
+
+    def setUp(self):
+        self.batch_size = 9
+        self.input_size = 400
+        self.output_size = 400
+        self.num_kernels = 20
+        self.num_channels = 20
+        self.kernelsize_x = 41
+        self.kernelsize_y = 41
+
+    def _performInitialization(self, initializer):
+        np.random.seed(1337)
+        layer = TestInitializers.DummyLayer(self.input_size, self.output_size)
+        layer.initialize(initializer)
+        weights_after_init = layer.weights.copy()
+        return layer.shape, weights_after_init
+
+    def test_uniform_shape(self):
+        weights_shape, weights_after_init = self._performInitialization(Initializers.UniformRandom())
+
+        self.assertEqual(weights_shape, weights_after_init.shape)
+
+    def test_uniform_distribution(self):
+        weights_shape, weights_after_init = self._performInitialization(Initializers.UniformRandom())
+
+        p_value = stats.kstest(weights_after_init.flat, 'uniform', args=(0, 1)).pvalue
+        self.assertGreater(p_value, 0.01)
+
+    def test_xavier_shape(self):
+        weights_shape, weights_after_init = self._performInitialization(Initializers.Xavier())
+
+        self.assertEqual(weights_shape, weights_after_init.shape)
+
+    def test_xavier_distribution(self):
+        weights_shape, weights_after_init = self._performInitialization(Initializers.Xavier())
+
+        scale = np.sqrt(2) / np.sqrt(self.input_size + self.output_size)
+        p_value = stats.kstest(weights_after_init.flat, 'norm', args=(0, scale)).pvalue
+        self.assertGreater(p_value, 0.01)
+
+    def test_he_shape(self):
+        weights_shape, weights_after_init = self._performInitialization(Initializers.He())
+
+        self.assertEqual(weights_shape, weights_after_init.shape)
+
+    def test_he_distribution(self):
+        weights_before_init, weights_after_init = self._performInitialization(Initializers.He())
+
+        scale = np.sqrt(2) / np.sqrt(self.input_size)
+        p_value = stats.kstest(weights_after_init.flat, 'norm', args=(0, scale)).pvalue
+        self.assertGreater(p_value, 0.01)
+
+
+class TestFlatten(unittest.TestCase):
+
+    def setUp(self):
+        self.batch_size = 9
+        self.input_shape = (3, 4, 11)
+        self.input_tensor = np.array(range(int(np.prod(self.input_shape) * self.batch_size)), dtype=float)
+        self.input_tensor = self.input_tensor.reshape(self.batch_size, *self.input_shape)
+
+    def test_trainable(self):
+        layer = Flatten.Flatten()
+        self.assertFalse(layer.trainable)
+
+    def test_flatten_forward(self):
+        flatten = Flatten.Flatten()
+        output_tensor = flatten.forward(self.input_tensor)
+        input_vector = np.array(range(int(np.prod(self.input_shape) * self.batch_size)), dtype=float)
+        input_vector = input_vector.reshape(self.batch_size, np.prod(self.input_shape))
+        self.assertLessEqual(np.sum(np.abs(output_tensor-input_vector)), 1e-9)
+
+    def test_flatten_backward(self):
+        flatten = Flatten.Flatten()
+        output_tensor = flatten.forward(self.input_tensor)
+        backward_tensor = flatten.backward(output_tensor)
+        self.assertLessEqual(np.sum(np.abs(self.input_tensor - backward_tensor)), 1e-9)
+
+
+class TestConv(unittest.TestCase):
+    plot = False
+    directory = 'plots/'
+
+    class TestInitializer:
+        def __init__(self):
+            self.fan_in = None
+            self.fan_out = None
+
+        def initialize(self, shape, fan_in, fan_out):
+            self.fan_in = fan_in
+            self.fan_out = fan_out
+            weights = np.zeros((1, 3, 3, 3))
+            weights[0, 1, 1, 1] = 1
+            return weights
+
+    def setUp(self):
+        self.batch_size = 2
+        self.input_shape = (3, 10, 14)
+        self.input_size = 14 * 10 * 3
+        self.uneven_input_shape = (3, 11, 15)
+        self.uneven_input_size = 15 * 11 * 3
+        self.spatial_input_shape = np.prod(self.input_shape[1:])
+        self.kernel_shape = (3, 5, 8)
+        self.num_kernels = 4
+        self.hidden_channels = 3
+
+        self.categories = 105
+        self.label_tensor = np.zeros([self.batch_size, self.categories])
+        for i in range(self.batch_size):
+            self.label_tensor[i, np.random.randint(0, self.categories)] = 1
+
+    def test_trainable(self):
+        layer = Conv.Conv((1, 1), self.kernel_shape, self.num_kernels)
+        self.assertTrue(layer.trainable)
+
+    def test_forward_size(self):
+        conv = Conv.Conv((1, 1), self.kernel_shape, self.num_kernels)
+        input_tensor = np.array(range(int(np.prod(self.input_shape) * self.batch_size)), dtype=float)
+        input_tensor = input_tensor.reshape(self.batch_size, *self.input_shape)
+        output_tensor = conv.forward(input_tensor)
+        self.assertEqual(output_tensor.shape, (self.batch_size, self.num_kernels, *self.input_shape[1:]))
+
+    def test_forward_size_stride(self):
+        conv = Conv.Conv((3, 2), self.kernel_shape, self.num_kernels)
+        input_tensor = np.array(range(int(np.prod(self.input_shape) * self.batch_size)), dtype=float)
+        input_tensor = input_tensor.reshape(self.batch_size, *self.input_shape)
+        output_tensor = conv.forward(input_tensor)
+        self.assertEqual(output_tensor.shape, (self.batch_size, self.num_kernels, 4, 7))
+
+    def test_forward_size_stride_uneven_image(self):
+        conv = Conv.Conv((3, 2), self.kernel_shape, self.num_kernels + 1)
+        input_tensor = np.array(range(int(np.prod(self.uneven_input_shape) * (self.batch_size + 1))), dtype=float)
+        input_tensor = input_tensor.reshape(self.batch_size + 1, *self.uneven_input_shape)
+        output_tensor = conv.forward(input_tensor)
+        self.assertEqual(output_tensor.shape, ( self.batch_size+1, self.num_kernels+1, 4, 8))
+
+    def test_forward(self):
+        np.random.seed(1337)
+        conv = Conv.Conv((1, 1), (1, 3, 3), 1)
+        conv.weights = (1./15.) * np.array([[[1, 2, 1], [2, 3, 2], [1, 2, 1]]])
+        conv.bias = np.array([0])
+        conv.weights = np.expand_dims(conv.weights, 0)
+        input_tensor = np.random.random((1, 1, 10, 14))
+        expected_output = gaussian_filter(input_tensor[0, 0, :, :], 0.85, mode='constant', cval=0.0, truncate=1.0)
+        output_tensor = conv.forward(input_tensor).reshape((10, 14))
+        difference = np.max(np.abs(expected_output - output_tensor))
+        self.assertAlmostEqual(difference, 0., places=1)
+
+    def test_forward_multi_channel(self):
+        np.random.seed(1337)
+        maps_in = 2
+        bias = 1
+        conv = Conv.Conv((1, 1), (maps_in, 3, 3), 1)
+        filter = (1./15.) * np.array([[[1, 2, 1], [2, 3, 2], [1, 2, 1]]])
+        conv.weights = np.repeat(filter[None, ...], maps_in, axis=1)
+        conv.bias = np.array([bias])
+        input_tensor = np.random.random((1, maps_in, 10, 14))
+        expected_output = bias
+        for map_i in range(maps_in):
+            expected_output = expected_output + gaussian_filter(input_tensor[0, map_i, :, :], 0.85, mode='constant', cval=0.0, truncate=1.0)
+        output_tensor = conv.forward(input_tensor).reshape((10, 14))
+        difference = np.max(np.abs(expected_output - output_tensor) / maps_in)
+        self.assertAlmostEqual(difference, 0., places=1)
+
+    def test_forward_fully_connected_channels(self):
+        np.random.seed(1337)
+        conv = Conv.Conv((1, 1), (3, 3, 3), 1)
+        conv.weights = (1. / 15.) * np.array([[[1, 2, 1], [2, 3, 2], [1, 2, 1]], [[1, 2, 1], [2, 3, 2], [1, 2, 1]], [[1, 2, 1], [2, 3, 2], [1, 2, 1]]])
+        conv.bias = np.array([0])
+        conv.weights = np.expand_dims(conv.weights, 0)
+        tensor = np.random.random((1, 1, 10, 14))
+        input_tensor = np.zeros((1, 3 , 10, 14))
+        input_tensor[:,0] = tensor.copy()
+        input_tensor[:,1] = tensor.copy()
+        input_tensor[:,2] = tensor.copy()
+        expected_output = 3 * gaussian_filter(input_tensor[0, 0, :, :], 0.85, mode='constant', cval=0.0, truncate=1.0)
+        output_tensor = conv.forward(input_tensor).reshape((10, 14))
+        difference = np.max(np.abs(expected_output - output_tensor))
+        self.assertLess(difference, 0.2)
+
+    def test_1D_forward_size(self):
+        conv = Conv.Conv([2], (3, 3), self.num_kernels)
+        input_tensor = np.array(range(3 * 15 * self.batch_size), dtype=float)
+        input_tensor = input_tensor.reshape((self.batch_size, 3, 15))
+        output_tensor = conv.forward(input_tensor)
+        self.assertEqual(output_tensor.shape,  (self.batch_size,self.num_kernels, 8))
+
+    def test_backward_size(self):
+        conv = Conv.Conv((1, 1), self.kernel_shape, self.num_kernels)
+        input_tensor = np.array(range(np.prod(self.input_shape) * self.batch_size), dtype=float)
+        input_tensor = input_tensor.reshape(self.batch_size, *self.input_shape)
+        output_tensor = conv.forward(input_tensor)
+        error_tensor = conv.backward(output_tensor)
+        self.assertEqual(error_tensor.shape, (self.batch_size, *self.input_shape))
+
+    def test_backward_size_stride(self):
+        conv = Conv.Conv((3, 2), self.kernel_shape, self.num_kernels)
+        input_tensor = np.array(range(np.prod(self.input_shape) * self.batch_size), dtype=float)
+        input_tensor = input_tensor.reshape(self.batch_size, *self.input_shape)
+        output_tensor = conv.forward(input_tensor)
+        error_tensor = conv.backward(output_tensor)
+        self.assertEqual(error_tensor.shape, (self.batch_size, *self.input_shape))
+
+    def test_1D_backward_size(self):
+        conv = Conv.Conv([2], (3, 3), self.num_kernels)
+        input_tensor = np.array(range(45 * self.batch_size), dtype=float)
+        input_tensor = input_tensor.reshape((self.batch_size, 3, 15))
+        output_tensor = conv.forward(input_tensor)
+        error_tensor = conv.backward(output_tensor)
+        self.assertEqual(error_tensor.shape, (self.batch_size, 3, 15))
+
+    def test_1x1_convolution(self):
+        conv = Conv.Conv((1, 1), (3, 1, 1), self.num_kernels)
+        input_tensor = np.array(range(self.input_size * self.batch_size), dtype=float)
+        input_tensor = input_tensor.reshape(self.batch_size, *self.input_shape)
+        output_tensor = conv.forward(input_tensor)
+        self.assertEqual(output_tensor.shape, (self.batch_size, self.num_kernels, *self.input_shape[1:]))
+        error_tensor = conv.backward(output_tensor)
+        self.assertEqual(error_tensor.shape, (self.batch_size, *self.input_shape))
+
+    def test_layout_preservation(self):
+        conv = Conv.Conv((1, 1), (3, 3, 3), 1)
+        conv.initialize(self.TestInitializer(), Initializers.Constant(0.0))
+        input_tensor = np.array(range(np.prod(self.input_shape) * self.batch_size), dtype=float)
+        input_tensor = input_tensor.reshape(self.batch_size, *self.input_shape)
+        output_tensor = conv.forward(input_tensor)
+        self.assertAlmostEqual(np.sum(np.abs(np.squeeze(output_tensor) - input_tensor[:,1,:,:])), 0.)
+
+    def test_gradient(self):
+        np.random.seed(1337)
+        input_tensor = np.abs(np.random.random((2, 3, 5, 7)))
+        layers = list()
+        layers.append(Conv.Conv((1, 1), (3, 3, 3), self.hidden_channels))
+        layers.append(Flatten.Flatten())
+        layers.append(L2Loss())
+        difference = Helpers.gradient_check(layers, input_tensor, self.label_tensor)
+        self.assertLessEqual(np.sum(difference), 5e-2)
+
+    def test_gradient_weights(self):
+        np.random.seed(1337)
+        input_tensor = np.abs(np.random.random((2, 3, 5, 7)))
+        layers = list()
+        layers.append(Conv.Conv((1, 1), (3, 3, 3), self.hidden_channels))
+        layers.append(Flatten.Flatten())
+        layers.append(L2Loss())
+        difference = Helpers.gradient_check_weights(layers, input_tensor, self.label_tensor, False)
+        self.assertLessEqual(np.sum(difference), 1e-5)
+
+    def test_gradient_weights_strided(self):
+        np.random.seed(1337)
+        label_tensor = np.random.random([self.batch_size, 36])
+        input_tensor = np.abs(np.random.random((2, 3, 5, 7)))
+        layers = list()
+        layers.append(Conv.Conv((2, 2), (3, 3, 3), self.hidden_channels))
+        layers.append(Flatten.Flatten())
+        layers.append(L2Loss())
+        difference = Helpers.gradient_check_weights(layers, input_tensor, label_tensor, False)
+        self.assertLessEqual(np.sum(difference), 1e-5)
+
+    def test_gradient_bias(self):
+        np.random.seed(1337)
+        input_tensor = np.abs(np.random.random((2, 3, 5, 7)))
+        layers = list()
+        layers.append(Conv.Conv((1, 1), (3, 3, 3), self.hidden_channels))
+        layers.append(Flatten.Flatten())
+        layers.append(L2Loss())
+        difference = Helpers.gradient_check_weights(layers, input_tensor, self.label_tensor, True)
+
+        self.assertLessEqual(np.sum(difference), 1e-5)
+
+    def test_weights_init(self):
+        # simply checks whether you have not initialized everything with zeros
+        conv = Conv.Conv((1, 1), (100, 10, 10), 150)
+        self.assertGreater(np.mean(np.abs(conv.weights)), 1e-3)
+
+    def test_bias_init(self):
+        conv = Conv.Conv((1, 1), (1, 1, 1), 150 * 100 * 10 * 10)
+        self.assertGreater(np.mean(np.abs(conv.bias)), 1e-3)
+
+    def test_gradient_stride(self):
+        np.random.seed(1337)
+        label_tensor = np.random.random([self.batch_size, 35])
+        input_tensor = np.abs(np.random.random((2, 6, 5, 14)))
+        layers = list()
+        layers.append(Conv.Conv((1, 2), (6, 3, 3), 1))
+        layers.append(Flatten.Flatten())
+        layers.append(L2Loss())
+        difference = Helpers.gradient_check(layers, input_tensor, label_tensor)
+        self.assertLessEqual(np.sum(difference), 1e-4)
+
+    def test_update(self):
+        input_tensor = np.random.uniform(-1, 1, (self.batch_size, *self.input_shape))
+        conv = Conv.Conv((3, 2), self.kernel_shape, self.num_kernels)
+        conv.optimizer = Optimizers.Sgd(1)
+        conv.initialize(Initializers.He(), Initializers.Constant(0.1))
+        # conv.weights = np.random.rand(4, 3, 5, 8)
+        # conv.bias = 0.1 * np.ones(4)
+        for _ in range(10):
+            output_tensor = conv.forward(input_tensor)
+            error_tensor = np.zeros_like(output_tensor)
+            error_tensor -= output_tensor
+            conv.backward(error_tensor)
+            new_output_tensor = conv.forward(input_tensor)
+            self.assertLess(np.sum(np.power(output_tensor, 2)), np.sum(np.power(new_output_tensor, 2)))
+
+    def test_initialization(self):
+        conv = Conv.Conv((1, 1), self.kernel_shape, self.num_kernels)
+        init = TestConv.TestInitializer()
+        conv.initialize(init, Initializers.Constant(0.1))
+        self.assertEqual(init.fan_in, np.prod(self.kernel_shape))
+        self.assertEqual(init.fan_out, np.prod(self.kernel_shape[1:]) * self.num_kernels)
+
+
+class TestPooling(unittest.TestCase):
+    plot = False
+    directory = 'plots/'
+
+    def setUp(self):
+        self.batch_size = 2
+        self.input_shape = (2, 4, 7)
+        self.input_size = np.prod(self.input_shape)
+
+        np.random.seed(1337)
+        self.input_tensor = np.random.uniform(-1, 1, (self.batch_size, *self.input_shape))
+
+        self.categories = 12
+        self.label_tensor = np.zeros([self.batch_size, self.categories])
+        for i in range(self.batch_size):
+            self.label_tensor[i, np.random.randint(0, self.categories)] = 1
+
+        self.layers = list()
+        self.layers.append(None)
+        self.layers.append(Flatten.Flatten())
+        self.layers.append(L2Loss())
+        self.plot_shape = (self.input_shape[0], np.prod(self.input_shape[1:]))
+
+    def test_trainable(self):
+        layer = Pooling.Pooling((2, 2), (2, 2))
+        self.assertFalse(layer.trainable)
+
+    def test_shape(self):
+        layer = Pooling.Pooling((2, 2), (2, 2))
+        result = layer.forward(self.input_tensor)
+        expected_shape = np.array([self.batch_size, 2, 2, 3])
+        self.assertEqual(np.sum(np.abs(np.array(result.shape) - expected_shape)), 0)
+
+    def test_overlapping_shape(self):
+        layer = Pooling.Pooling((2, 1), (2, 2))
+        result = layer.forward(self.input_tensor)
+        expected_shape = np.array([self.batch_size, 2, 2, 6])
+        self.assertEqual(np.sum(np.abs(np.array(result.shape) - expected_shape)), 0)
+
+    def test_subsampling_shape(self):
+        layer = Pooling.Pooling((3, 2), (2, 2))
+        result = layer.forward(self.input_tensor)
+        expected_shape = np.array([self.batch_size, 2, 1, 3])
+        self.assertEqual(np.sum(np.abs(np.array(result.shape) - expected_shape)), 0)
+
+    def test_gradient_stride(self):
+        self.layers[0] = Pooling.Pooling((2, 2), (2, 2))
+        difference = Helpers.gradient_check(self.layers, self.input_tensor, self.label_tensor)
+        self.assertLessEqual(np.sum(difference), 1e-6)
+
+    def test_gradient_overlapping_stride(self):
+        label_tensor = np.random.random((self.batch_size, 24))
+        self.layers[0] = Pooling.Pooling((2, 1), (2, 2))
+        difference = Helpers.gradient_check(self.layers, self.input_tensor, label_tensor)
+        self.assertLessEqual(np.sum(difference), 1e-6)
+
+    def test_gradient_subsampling_stride(self):
+        label_tensor = np.random.random((self.batch_size, 6))
+        self.layers[0] = Pooling.Pooling((3, 2), (2, 2))
+        difference = Helpers.gradient_check(self.layers, self.input_tensor, label_tensor)
+        self.assertLessEqual(np.sum(difference), 1e-6)
+
+    def test_layout_preservation(self):
+        pool = Pooling.Pooling((1, 1), (1, 1))
+        input_tensor = np.array(range(np.prod(self.input_shape) * self.batch_size), dtype=float)
+        input_tensor = input_tensor.reshape(self.batch_size, *self.input_shape)
+        output_tensor = pool.forward(input_tensor)
+        self.assertAlmostEqual(np.sum(np.abs(output_tensor-input_tensor)), 0.)
+
+    def test_expected_output_valid_edgecase(self):
+        input_shape = (1, 3, 3)
+        pool = Pooling.Pooling((2, 2), (2, 2))
+        batch_size = 2
+        input_tensor = np.array(range(np.prod(input_shape) * batch_size), dtype=float)
+        input_tensor = input_tensor.reshape(batch_size, *input_shape)
+        result = pool.forward(input_tensor)
+        expected_result = np.array([[[[4]]], [[[13]]]])
+        self.assertEqual(np.sum(np.abs(result - expected_result)), 0)
+
+    def test_expected_output(self):
+        input_shape = (1, 4, 4)
+        pool = Pooling.Pooling((2, 2), (2, 2))
+        batch_size = 2
+        input_tensor = np.array(range(np.prod(input_shape) * batch_size), dtype=float)
+        input_tensor = input_tensor.reshape(batch_size, *input_shape)
+        result = pool.forward(input_tensor)
+        expected_result = np.array([[[[ 5.,  7.],[13., 15.]]],[[[21., 23.],[29., 31.]]]])
+        self.assertEqual(np.sum(np.abs(result - expected_result)), 0)
+
+
+class TestNeuralNetwork2(unittest.TestCase):
+    plot = False
+    directory = 'plots/'
+    log = 'log.txt'
 
     def test_append_layer(self):
-        # this test checks if your network actually appends layers and whether it copies the optimizer to these layers
-        net = NeuralNetwork.NeuralNetwork(Optimizers.Sgd(1))
+        # this test checks if your network actually appends layers, whether it copies the optimizer to these layers, and
+        # whether it handles the initialization of the layer's weights
+        net = NeuralNetwork.NeuralNetwork(Optimizers.Sgd(1),
+                                          Initializers.Constant(0.123),
+                                          Initializers.Constant(0.123))
         fcl_1 = FullyConnected.FullyConnected(1, 1)
         net.append_layer(fcl_1)
         fcl_2 = FullyConnected.FullyConnected(1, 1)
@@ -308,9 +771,12 @@ class TestNeuralNetwork1(unittest.TestCase):
 
         self.assertEqual(len(net.layers), 2)
         self.assertFalse(net.layers[0].optimizer is net.layers[1].optimizer)
+        self.assertTrue(np.all(net.layers[0].weights == 0.123))
 
     def test_data_access(self):
-        net = NeuralNetwork.NeuralNetwork(Optimizers.Sgd(1))
+        net = NeuralNetwork.NeuralNetwork(Optimizers.Sgd(1e-4),
+                                          Initializers.UniformRandom(),
+                                          Initializers.Constant(0.1))
         categories = 3
         input_size = 4
         net.data_layer = Helpers.IrisData(50)
@@ -328,12 +794,13 @@ class TestNeuralNetwork1(unittest.TestCase):
         self.assertNotEqual(out, out2)
 
     def test_iris_data(self):
-        net = NeuralNetwork.NeuralNetwork(Optimizers.Sgd(1e-3))
+        net = NeuralNetwork.NeuralNetwork(Optimizers.Sgd(1e-3),
+                                          Initializers.UniformRandom(),
+                                          Initializers.Constant(0.1))
         categories = 3
         input_size = 4
-        net.data_layer = Helpers.IrisData(50)
+        net.data_layer = Helpers.IrisData(100)
         net.loss_layer = Loss.CrossEntropyLoss()
-
         fcl_1 = FullyConnected.FullyConnected(input_size, categories)
         net.append_layer(fcl_1)
         net.append_layer(ReLU.ReLU())
@@ -342,37 +809,139 @@ class TestNeuralNetwork1(unittest.TestCase):
         net.append_layer(SoftMax.SoftMax())
 
         net.train(4000)
-        plt.figure('Loss function for a Neural Net on the Iris dataset using SGD')
-        plt.plot(net.loss, '-x')
-        plt.show()
+        if TestNeuralNetwork2.plot:
+            fig = plt.figure('Loss function for a Neural Net on the Iris dataset using SGD')
+            plt.plot(net.loss, '-x')
+            fig.savefig(os.path.join(self.directory, "TestNeuralNetwork2.pdf"), transparent=True, bbox_inches='tight', pad_inches=0)
 
         data, labels = net.data_layer.get_test_set()
 
         results = net.test(data)
-        index_maximum = np.argmax(results, axis=1)
-        one_hot_vector = np.zeros_like(results)
-        for i in range(one_hot_vector.shape[0]):
-            one_hot_vector[i, index_maximum[i]] = 1
 
-        correct = 0.
-        wrong = 0.
-        for column_results, column_labels in zip(one_hot_vector, labels):
-            if column_results[column_labels > 0].all() > 0:
-                correct += 1
-            else:
-                wrong += 1
+        accuracy = Helpers.calculate_accuracy(results, labels)
+        with open(self.log, 'a') as f:
+            print('On the Iris dataset, we achieve an accuracy of: ' + str(accuracy * 100) + '%', file=f)
+        self.assertGreater(accuracy, 0.9)
 
-        accuracy = correct / (correct + wrong)
-        print('\nOn the Iris dataset, we achieve an accuracy of: ' + str(accuracy * 100) + '%')
-        self.assertGreater(accuracy, 0.8)
+    def test_iris_data_with_momentum(self):
+        net = NeuralNetwork.NeuralNetwork(Optimizers.SgdWithMomentum(1e-3, 0.8),
+                                          Initializers.UniformRandom(),
+                                          Initializers.Constant(0.1))
+        categories = 3
+        input_size = 4
+        net.data_layer = Helpers.IrisData(100)
+        net.loss_layer = Loss.CrossEntropyLoss()
+        fcl_1 = FullyConnected.FullyConnected(input_size, categories)
+        net.append_layer(fcl_1)
+        net.append_layer(ReLU.ReLU())
+        fcl_2 = FullyConnected.FullyConnected(categories, categories)
+        net.append_layer(fcl_2)
+        net.append_layer(SoftMax.SoftMax())
+
+        net.train(2000)
+        if TestNeuralNetwork2.plot:
+            fig = plt.figure('Loss function for a Neural Net on the Iris dataset using Momentum')
+            plt.plot(net.loss, '-x')
+            fig.savefig(os.path.join(self.directory, "TestNeuralNetwork2_Momentum.pdf"), transparent=True, bbox_inches='tight', pad_inches=0)
+
+        data, labels = net.data_layer.get_test_set()
+
+        results = net.test(data)
+
+        accuracy = Helpers.calculate_accuracy(results, labels)
+        with open(self.log, 'a') as f:
+            print('On the Iris dataset, we achieve an accuracy of: ' + str(accuracy * 100) + '%', file=f)
+        self.assertGreater(accuracy, 0.9)
+
+    def test_iris_data_with_adam(self):
+        net = NeuralNetwork.NeuralNetwork(Optimizers.Adam(1e-2, 0.9, 0.999),
+                                          Initializers.UniformRandom(),
+                                          Initializers.Constant(0.1))
+        categories = 3
+        input_size = 4
+        net.data_layer = Helpers.IrisData(100)
+        net.loss_layer = Loss.CrossEntropyLoss()
+        fcl_1 = FullyConnected.FullyConnected(input_size, categories)
+        net.append_layer(fcl_1)
+        net.append_layer(ReLU.ReLU())
+        fcl_2 = FullyConnected.FullyConnected(categories, categories)
+        net.append_layer(fcl_2)
+        net.append_layer(SoftMax.SoftMax())
+
+        net.train(2000)
+        if TestNeuralNetwork2.plot:
+            fig = plt.figure('Loss function for a Neural Net on the Iris dataset using ADAM')
+            plt.plot(net.loss, '-x')
+            fig.savefig(os.path.join(self.directory, "TestNeuralNetwork2_ADAM.pdf"), transparent=True, bbox_inches='tight', pad_inches=0)
+
+        data, labels = net.data_layer.get_test_set()
+
+        results = net.test(data)
+
+        accuracy = Helpers.calculate_accuracy(results, labels)
+        with open(self.log, 'a') as f:
+            print('On the Iris dataset, we achieve an accuracy of: ' + str(accuracy * 100) + '%', file=f)
+        self.assertGreater(accuracy, 0.9)
+
+    def test_digit_data(self):
+        net = NeuralNetwork.NeuralNetwork(Optimizers.Adam(5e-3, 0.98, 0.999),
+                                          Initializers.He(),
+                                          Initializers.Constant(0.1))
+        input_image_shape = (1, 8, 8)
+        conv_stride_shape = (1, 1)
+        convolution_shape = (1, 3, 3)
+        categories = 10
+        batch_size = 200
+        num_kernels = 4
+
+        net.data_layer = Helpers.DigitData(batch_size)
+        net.loss_layer = Loss.CrossEntropyLoss()
+
+        cl_1 = Conv.Conv(conv_stride_shape, convolution_shape, num_kernels)
+        net.append_layer(cl_1)
+        cl_1_output_shape = (*input_image_shape[1:], num_kernels)
+        net.append_layer(ReLU.ReLU())
+
+        pool = Pooling.Pooling((2, 2), (2, 2))
+        pool_output_shape = (4, 4, 4)
+        net.append_layer(pool)
+        fcl_1_input_size = np.prod(pool_output_shape)
+
+        net.append_layer(Flatten.Flatten())
+
+        fcl_1 = FullyConnected.FullyConnected(fcl_1_input_size, int(fcl_1_input_size/2.))
+        net.append_layer(fcl_1)
+
+        net.append_layer(ReLU.ReLU())
+
+        fcl_2 = FullyConnected.FullyConnected(int(fcl_1_input_size/2.), categories)
+        net.append_layer(fcl_2)
+
+        net.append_layer(SoftMax.SoftMax())
+
+        net.train(200)
+
+        if TestNeuralNetwork2.plot:
+            description = 'on_digit_data'
+            fig = plt.figure('Loss function for training a Convnet on the Digit dataset')
+            plt.plot(net.loss, '-x')
+            fig.savefig(os.path.join(self.directory, "TestConvNet_" + description + ".pdf"), transparent=True, bbox_inches='tight', pad_inches=0)
+
+        data, labels = net.data_layer.get_test_set()
+
+        results = net.test(data)
+
+        accuracy = Helpers.calculate_accuracy(results, labels)
+        with open(self.log, 'a') as f:
+            print('On the UCI ML hand-written digits dataset, we achieve an accuracy of: ' + str(accuracy * 100) + '%', file=f)
+        print('\nOn the UCI ML hand-written digits dataset, we achieve an accuracy of: ' + str(accuracy * 100) + '%')
+        self.assertGreater(accuracy, 0.5)
 
 
 class L2Loss:
+
     def __init__(self):
         self.input_tensor = None
-
-    def predict(self, input_tensor):
-        return input_tensor
 
     def forward(self, input_tensor, label_tensor):
         self.input_tensor = input_tensor
@@ -382,14 +951,15 @@ class L2Loss:
         return 2*np.subtract(self.input_tensor, label_tensor)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     import sys
     if sys.argv[-1] == "Bonus":
+        # sys.argv.pop()
         loader = unittest.TestLoader()
         bonus_points = {}
-        tests = [TestCrossEntropyLoss, TestFullyConnected1, TestReLU, TestOptimizers1, TestNeuralNetwork1, TestSoftMax]
-        percentages = [10, 45, 5, 5, 25, 10]
+        tests = [TestOptimizers2, TestInitializers, TestFlatten, TestConv, TestPooling, TestFullyConnected2, TestNeuralNetwork2]
+        percentages = [8, 5, 2, 45, 15, 2, 23]
         total_points = 0
         for t, p in zip(tests, percentages):
             if unittest.TextTestRunner().run(loader.loadTestsFromTestCase(t)).wasSuccessful():
@@ -401,12 +971,15 @@ if __name__ == '__main__':
         import time
         time.sleep(1)
         print("=========================== Statistics ===============================")
-        exam_percentage = 1.5
+        exam_percentage = 3
         table = []
         for i, (k, (outcome, p)) in enumerate(bonus_points.items()):
-            table.append([i, k, outcome, "0 / {} (%)".format(p) if outcome == "FAIL" else "{} / {} (%)".format(p, p), "{:.3f} / 10 (%)".format(p/100 * exam_percentage)])
+            table.append([i, k, outcome, "0 / {} (%)".format(p) if outcome == "FAIL" else "{} / {} (%)".format(p, p),
+                          "{:.3f} / 10 (%)".format(p / 100 * exam_percentage)])
         table.append([])
-        table.append(["Ex1", "Total Achieved", "", "{} / 100 (%)".format(total_points), "{:.3f} / 10 (%)".format(total_points * exam_percentage / 100)])
+        table.append(["Ex2", "Total Achieved", "", "{} / 100 (%)".format(total_points),
+                      "{:.3f} / 10 (%)".format(total_points * exam_percentage / 100)])
+
         print(tabulate.tabulate(table, headers=['Pos', 'Test', "Result", 'Percent in Exercise', 'Percent in Exam'], tablefmt="github"))
     else:
         unittest.main()
