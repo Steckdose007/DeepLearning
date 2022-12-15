@@ -26,7 +26,7 @@ class Xavier:
         self.fan_out = None
 
     def initialize(self, dimension_weight, fan_in, fan_out):
-        return np.reshape(np.random.normal(0.0, math.sqrt(2/(fan_in+fan_out)), dimension_weight), weights_shape)
+        return np.reshape(np.random.normal(0.0, math.sqrt(2/(fan_in+fan_out)), dimension_weight), dimension_weight)
 
 class He:
     def __init__(self):

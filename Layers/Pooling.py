@@ -12,33 +12,34 @@ class Pooling():
     def forward(self, input_tensor):
         self.input_tensor = input_tensor
         S = self.stride_shape
-        x_pooling = self.pooling_shape[0]
-        y_pooling = self.pooling_shape[1]
-        y_size = 1 + math.floor((self.input_tensor.shape[2]-x_pooling)/S[0])
-        x_size = 1 + math.floor((self.input_tensor.shape[3] - y_pooling) / S[1])
-        out= np.zeros((self.input_tensor.shape[0],self.input_tensor.shape[1],y_size,x_size))
+        xPooling = self.pooling_shape[0]
+        yPooling = self.pooling_shape[1]
+        ySize = 1 + math.floor((self.input_tensor.shape[2] - xPooling) / S[0])
+        xSize = 1 + math.floor((self.input_tensor.shape[3] - yPooling) / S[1])
+        out= np.zeros((self.input_tensor.shape[0], self.input_tensor.shape[1], ySize, xSize))
 
         for image in range(self.input_tensor.shape[0]):
             for channel in range(self.input_tensor.shape[1]):
-                for y in range(y_size):
-                    for x in range(x_size):
-                        out[image,channel,y,x] = np.max(input_tensor[image,channel,y*S[0]:y*S[0]+x_pooling,x*S[1]:x*S[1]+y_pooling])
+                for y in range(ySize):
+                    for x in range(xSize):
+                        out[image,channel,y,x] = np.max(input_tensor[image,channel,y*S[0]:y * S[0] + xPooling, x * S[1]:x * S[1] + yPooling])
         return out
 
     def backward(self, error_tensor):
         output_size = self.input_tensor.shape
         output = np.zeros(output_size)
         S = self.stride_shape
-        x_pooling = self.pooling_shape[0]
-        y_pooling = self.pooling_shape[1]
-        y_size = 1 + math.floor((self.input_tensor.shape[2]-x_pooling)/S[0])
-        x_size = 1 + math.floor((self.input_tensor.shape[3] - y_pooling) / S[1])
+        xPooling = self.pooling_shape[0]
+        yPooling = self.pooling_shape[1]
+        ySize = 1 + math.floor((self.input_tensor.shape[2] - xPooling) / S[0])
+        xSize = 1 + math.floor((self.input_tensor.shape[3] - yPooling) / S[1])
 
         for image in range(self.input_tensor.shape[0]):
             for channel in range(self.input_tensor.shape[1]):
-                for y in range(y_size):
-                    for x in range(x_size):
-                        curr_slice=self.input_tensor[image, channel, y * S[0]:y * S[0] + x_pooling, x * S[1]:x * S[1] + y_pooling]
+                for y in range(ySize):
+                    for x in range(xSize):
+                        curr_slice= self.input_tensor[image, channel, y * S[0]:y * S[0] + xPooling, x * S[1]:x * S[1] + yPooling]
+                        #gives us the two-d coordinates from argmax
                         index = np.unravel_index(curr_slice.argmax(), curr_slice.shape)
                         output[image,channel,y*S[0]+index[0],x*S[1]+index[1]] =output[image,channel,y*S[0]+index[0],x*S[1]+index[1]]+error_tensor[image,channel,y,x]
 
