@@ -19,16 +19,22 @@ class NeuralNetwork():
         self.loss_layer = None
         self.input_tensor=None
         self.label_tensor=None
+        #property phase because for training f.e. some connections drop out zero
+        self.phase = False
 
     def forward(self):
-        #get input and label and store it for later use in backward
-        self.input_tensor,self.label_tensor = self.data_layer.next()
-        last = self.input_tensor
-        #input durch alle durchschleusen und input von einer layer als input für neue
-        for i in self.layers:
-            last = i.forward(last)
-        #calculate loss and return it
-        loss = self.loss_layer.forward(last,self.label_tensor)
+        self.input_tensor, self.label_tensor = self.data_layer.next()
+        input_tensor = copy.deepcopy(self.input_tensor)
+        loss = 0
+        for layer in self.layers:
+            if not self.phase and layer.optimizer is not None:
+                if type(layer.optimizer) == tuple:
+                    if layer.optimizer[0].regularizer is not None:
+                        loss = loss + layer.optimizer[0].regularizer.norm(layer.weights)
+                elif layer.optimizer.regularizer is not None:
+                    loss = loss + layer.optimizer.regularizer.norm(layer.weights)
+            input_tensor = layer.forward(input_tensor)
+        loss = self.loss_layer.forward(input_tensor, self.label_tensor) + loss
         return loss
 
     def backward(self):
@@ -42,7 +48,7 @@ class NeuralNetwork():
         if(layer.trainable == True):
             #deepcopy creates new object without modifying old one
             optimizer = copy.deepcopy(self.optimizer)
-            layer._optimizer = optimizer
+            layer.optimizer = optimizer
             layer.initialize(self.weights_initializer, self.bias_initializer)
         self.layers.append(layer)
 
@@ -55,3 +61,13 @@ class NeuralNetwork():
         for i in self.layers:
             input_tensor = i.forward(input_tensor)
         return input_tensor
+
+    @property
+    def phase(self):
+        return self.__phase
+
+    @phase.setter
+    def phase(self, testing_phase):
+        for layer in self.layers:
+            layer.testing_phase = testing_phase
+        self.__phase = testing_phase
